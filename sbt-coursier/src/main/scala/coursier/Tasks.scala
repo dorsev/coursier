@@ -10,6 +10,7 @@ import coursier.interop.scalaz._
 import coursier.ivy.{IvyRepository, PropertiesPattern}
 import coursier.Keys._
 import coursier.Structure._
+import coursier.ToSbt.SimpleArtifact
 import coursier.util.Print.Colors
 import coursier.util.{Parse, Print}
 import sbt.librarymanagement._
@@ -987,14 +988,14 @@ object Tasks {
 
       val allArtifacts0 =
         classifiers match {
-          case None => res.flatMap(_.artifacts(withOptional = true))
-          case Some(cl) => res.flatMap(_.classifiersArtifacts(cl))
+          case None => res.flatMap(_.dependencyArtifacts(withOptional = true).map(_._2))
+          case Some(cl) => res.flatMap(_.dependencyClassifiersArtifacts(cl).map(_._2))
         }
 
       val allArtifacts =
         if (includeSignatures)
           allArtifacts0.flatMap { a =>
-            val sigOpt = a.extra.get("sig").map(_.copy(attributes = Attributes()))
+            val sigOpt = a.extra.get("sig")
             Seq(a) ++ sigOpt.toSeq
           }
         else
@@ -1068,30 +1069,27 @@ object Tasks {
 
   private def artifactFileOpt(
     sbtBootJarOverrides: Map[(Module, String), File],
-    artifactFiles: Map[Artifact, File],
-    erroredArtifacts: Set[Artifact],
+    artifactFiles: Map[SimpleArtifact, File],
+    erroredArtifacts: Set[SimpleArtifact],
     log: sbt.Logger,
     module: Module,
     version: String,
-    artifact: Artifact
+    artifact: SimpleArtifact
   ) = {
-
-    val artifact0 = artifact
-      .copy(attributes = Attributes()) // temporary hack :-(
 
     // Under some conditions, SBT puts the scala JARs of its own classpath
     // in the application classpath. Ensuring we return SBT's jars rather than
     // JARs from the coursier cache, so that a same JAR doesn't land twice in the
     // application classpath (once via SBT jars, once via coursier cache).
     val fromBootJars =
-      if (artifact.classifier.isEmpty && artifact.`type` == "jar")
+      if (artifact.attributes.classifier.isEmpty && artifact.attributes.`type` == "jar")
         sbtBootJarOverrides.get((module, version))
       else
         None
 
-    val res = fromBootJars.orElse(artifactFiles.get(artifact0))
+    val res = fromBootJars.orElse(artifactFiles.get(artifact))
 
-    if (res.isEmpty && !erroredArtifacts(artifact0))
+    if (res.isEmpty && !erroredArtifacts(artifact))
       log.error(s"${artifact.url} not downloaded (should not happen)")
 
     res
@@ -1272,14 +1270,14 @@ object Tasks {
 
         val artifactFiles = artifactFilesOrErrors0.collect {
           case (artifact, Right(file)) =>
-            artifact -> file
+            SimpleArtifact(artifact) -> file
         }
 
         val artifactErrors = artifactFilesOrErrors0
           .toVector
           .collect {
             case (a, Left(err)) if !a.isOptional || !err.notFound =>
-              a -> err
+              SimpleArtifact(a) -> err
           }
 
         if (artifactErrors.nonEmpty) {
@@ -1294,7 +1292,7 @@ object Tasks {
         // can be non empty only if ignoreArtifactErrors is true or some optional artifacts are not found
         val erroredArtifacts = artifactFilesOrErrors0.collect {
           case (artifact, Left(_)) =>
-            artifact
+            SimpleArtifact(artifact)
         }.toSet
 
         ToSbt.updateReport(

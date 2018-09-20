@@ -11,6 +11,13 @@ import coursier.maven.MavenSource
 
 object ToSbt {
 
+  final case class SimpleArtifact(url: String, attributes: Attributes)
+
+  object SimpleArtifact {
+    def apply(artifact: Artifact): SimpleArtifact =
+      SimpleArtifact(artifact.url, artifact.attributes)
+  }
+
   private def caching[K, V](f: K => V): K => V = {
 
     val cache = new ConcurrentHashMap[K, V]
@@ -50,7 +57,7 @@ object ToSbt {
       )
   }
 
-  val artifact = caching[(Module, Map[String, String], Artifact), sbt.librarymanagement.Artifact] {
+  val artifact = caching[(Module, Map[String, String], SimpleArtifact), sbt.librarymanagement.Artifact] {
     case (module, extraProperties, artifact) =>
       sbt.librarymanagement.Artifact(module.name)
         // FIXME Get these two from publications
@@ -66,7 +73,7 @@ object ToSbt {
         .withExtraAttributes(module.attributes ++ extraProperties)
   }
 
-  val moduleReport = caching[(Dependency, Seq[(Dependency, Project)], Project, Seq[(Artifact, Option[File])]), ModuleReport] {
+  val moduleReport = caching[(Dependency, Seq[(Dependency, Project)], Project, Seq[(SimpleArtifact, Option[File])]), ModuleReport] {
     case (dependency, dependees, project, artifacts) =>
 
     val sbtArtifacts = artifacts.collect {
@@ -127,7 +134,7 @@ object ToSbt {
   def moduleReports(
     res: Resolution,
     classifiersOpt: Option[Seq[String]],
-    artifactFileOpt: (Module, String, Artifact) => Option[File],
+    artifactFileOpt: (Module, String, SimpleArtifact) => Option[File],
     log: Logger,
     keepPomArtifact: Boolean = false,
     includeSignatures: Boolean = false
@@ -201,12 +208,12 @@ object ToSbt {
             (dependee, dependeeProj)
           }
 
-        ToSbt.moduleReport(
+        ToSbt.moduleReport((
           dep,
           dependees,
           proj,
-          artifacts.map(a => a -> artifactFileOpt(proj.module, proj.version, a))
-        )
+          artifacts.map(a => SimpleArtifact(a) -> artifactFileOpt(proj.module, proj.version, SimpleArtifact(a)))
+        ))
     }
   }
 
@@ -215,7 +222,7 @@ object ToSbt {
     resolutions: Map[String, Resolution],
     configs: Map[String, Set[String]],
     classifiersOpt: Option[Seq[String]],
-    artifactFileOpt: (Module, String, Artifact) => Option[File],
+    artifactFileOpt: (Module, String, SimpleArtifact) => Option[File],
     log: Logger,
     keepPomArtifact: Boolean = false,
     includeSignatures: Boolean = false
